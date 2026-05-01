@@ -1,4 +1,4 @@
-package com.example.chatbot
+package com.example.kotlin_chatbot
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
