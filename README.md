@@ -9,6 +9,31 @@ A Kotlin-based Android edge application powered by the **Gemma 4:E2B** model run
 
 This app ingests live high-frequency `.vbo` telemetry (steering, speed, etc.) from the **ApexAI** racing simulator backend over WebSockets, analyzes driving behavior, and uses LLM-powered inference to generate context-aware coaching feedback through text-to-speech.
 
+---
+
+## Readiness Assessment & Addressed Gaps
+
+This repository serves as the unified edge architecture intended to pass the *Final Architecture & Readiness Assessment* for Team 3's Sonoma Raceway field test. It directly addresses the pending blockers identified by the review committee:
+
+### 1. Architectural Consolidation
+- **Deprecated `flutter_gemma_test`:** We entirely removed the fragmented Flutter implementation in favor of a strictly native Android (Kotlin + Jetpack Compose) stack using Google's `LiteRT-LM`. This solves the severe architectural fragmentation and instability seen in the earlier cross-platform modules.
+- **Defined API Contracts:** Core logic is unified. Telemetry ingestion, inference triggering, and UI display are cleanly separated via strict Kotlin data contracts (`CoachingPayload` and `TelemetryData`).
+
+### 2. Thermal & Compute Load Optimization
+- **Gated Inference Engine:** Operating the Pixel 10 at 10Hz within a high-heat cabin environment previously risked thermal throttling. We introduced a `GatedInferenceEngine` that constantly evaluates steering variance. The Gemma LLM is now strictly prevented from executing mid-corner; inference compute cycles only trigger during stable straightaway segments.
+
+### 3. Pedagogical Tuning (The Pro Driver / T-Rod)
+- **Straightaway Delivery Windows:** Mid-corner audio cues are a severe safety risk. By triggering inference immediately upon detecting corner exit, Text-to-Speech instructions are formulated and delivered 2-3 seconds prior to the *next* corner entry, honoring the driver's cognitive bandwidth.
+- **Hyper-Specific Micro-Adjustments:** The `Gemma4Manager` system prompt explicitly enforces structured JSON generation that provides exact measurements (e.g., "Apply 0.05 bar throttle") rather than generic advice.
+
+### 4. End-to-End Latency Validation
+- **Latency Tracker:** We introduced a dedicated `LatencyTracker` logging module. It captures the exact delta between receiving the WebSocket packet from `apexai` to the moment the audio buffer is released to the TTS engine, ensuring the pipeline remains within the strict 2-3 second latency budget required for a 150+ mph field test.
+
+### 5. Extensibility & Wired Integration
+- Standardized the schema (`CoachingPayload`) so that the racing heuristics remain decoupled from the UI framework. The `TelemetryManager` relies on a standard HTTP WebSocket implementation, keeping the edge app ready to swap from the local `apexai` simulator stream to a raw wired USB-C CANbus serial stream on the day of the Sonoma field test.
+
+---
+
 ## Features
 
 - **Telemetry Dashboard:** Live speed and steering tracking built with Jetpack Compose (Material 3).
