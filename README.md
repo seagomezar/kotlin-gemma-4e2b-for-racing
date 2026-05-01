@@ -1,9 +1,7 @@
 # Sonoma Racing Coach (Edge Integration)
 
-<div align="center">
-  <img src="images/dashboard_waiting.png" width="30%" alt="Dashboard Waiting for Telemetry">
-  <img src="images/dashboard_active.png" width="30%" alt="Dashboard Active Coaching">
-</div>
+![Dashboard Waiting for Telemetry](images/dashboard_waiting.png)
+![Dashboard Active Coaching](images/dashboard_active.png)
 
 A Kotlin-based Android edge application powered by the **Gemma 4:E2B** model running entirely on-device to deliver predictive, actionable insights to a professional racing driver in real-time. 
 
