@@ -47,7 +47,7 @@ This repository serves as the unified edge architecture intended to pass the *Fi
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/seagomezar/kotlin-gemma-4e2b-for-racing.git
+git clone https://github.com/seagomezar/sonoma-racing-coach.git
 ```
 
 Open the project in Android Studio.
