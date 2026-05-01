@@ -51,6 +51,8 @@ dependencies {
     implementation("io.noties.markwon:core:4.6.2")
     implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("com.google.code.gson:gson:2.10.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

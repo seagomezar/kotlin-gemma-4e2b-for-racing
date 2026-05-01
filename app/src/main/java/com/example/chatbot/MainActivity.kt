@@ -1,43 +1,35 @@
-package com.example.kotlin_chatbot
+package com.example.chatbot
 
-import android.content.Context
 import android.os.Bundle
-import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.foundation.shape.CutCornerShape
-import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.ui.text.font.FontStyle
-import com.google.ai.edge.litertlm.*
-import io.noties.markwon.Markwon
+import androidx.compose.ui.unit.sp
+import com.example.chatbot.core.AudioDeliveryManager
+import com.example.chatbot.core.GatedInferenceEngine
+import com.example.chatbot.core.Gemma4Manager
+import com.example.chatbot.core.LatencyTracker
+import com.example.chatbot.core.TelemetryManager
+import com.example.chatbot.models.CoachingPayload
+import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 
 // ---------- THEME ----------
 
@@ -66,13 +58,6 @@ private val RacingShapes = Shapes(
     large = CutCornerShape(topStart = 24.dp, bottomEnd = 24.dp)
 )
 
-// ---------- DATA ----------
-
-data class ChatMessage(
-    val text: String,
-    val isUser: Boolean
-)
-
 // ---------- ACTIVITY ----------
 
 class MainActivity : ComponentActivity() {
@@ -85,80 +70,95 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    ChatScreen()
+                    DashboardScreen()
                 }
             }
         }
     }
 }
 
-// ---------- GEMMA MANAGER ----------
-
-class Gemma4Manager(private val context: Context) {
-    private var engine: Engine? = null
-    private var conversation: Conversation? = null
-
-    suspend fun initialize() {
-        if (conversation != null) return
-
-        if (engine == null) {
-            val config = EngineConfig(
-                modelPath = "/data/local/tmp/llm/gemma-4-E2B-it.litertlm",
-                backend = Backend.CPU(),
-                cacheDir = context.cacheDir.absolutePath
-            )
-
-            val newEngine = Engine(config)
-            newEngine.initialize()
-            engine = newEngine
-        }
-
-        if (conversation == null) {
-            conversation = engine!!.createConversation()
-        }
-    }
-
-    fun reply(prompt: String): String {
-        val currentConversation = conversation ?: error("Conversation not initialized")
-        return currentConversation.sendMessage(prompt).toString()
-    }
-
-    fun close() {
-        conversation?.close()
-        conversation = null
-        engine?.close()
-        engine = null
-    }
-}
-
 // ---------- UI ----------
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen() {
+fun DashboardScreen() {
     val context = LocalContext.current
-    val messages = remember {
-        mutableStateListOf(
-            ChatMessage("Hello! I am your on-device Gemma 4:E2B chatbot.", false)
-        )
+    val scope = rememberCoroutineScope()
+    
+    // Core Managers
+    val telemetryManager = remember { TelemetryManager() }
+    val gatedInferenceEngine = remember { GatedInferenceEngine() }
+    val gemmaManager = remember { Gemma4Manager(context) }
+    val audioDeliveryManager = remember { AudioDeliveryManager(context) }
+    val gson = remember { Gson() }
+
+    // State
+    var speed by remember { mutableStateOf(0.0) }
+    var steering by remember { mutableStateOf(0.0) }
+    var isThinking by remember { mutableStateOf(false) }
+    var latestCoaching by remember { mutableStateOf<CoachingPayload?>(null) }
+    var systemStatus by remember { mutableStateOf("Initializing Gemma...") }
+
+    // Lifecycle
+    DisposableEffect(Unit) {
+        telemetryManager.startListening() // Connects to apexai websocket
+        
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                gemmaManager.initialize()
+            }
+            systemStatus = "Ready & Waiting for Telemetry"
+        }
+
+        onDispose {
+            telemetryManager.stopListening()
+            gemmaManager.close()
+            audioDeliveryManager.shutdown()
+        }
     }
 
-    var inputText by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
+    // Telemetry Pipeline
+    LaunchedEffect(Unit) {
+        telemetryManager.telemetryFlow.collect { packet ->
+            // Update UI
+            speed = packet.speed ?: 0.0
+            steering = packet.steering ?: 0.0
+            
+            // Route to Engine
+            gatedInferenceEngine.processTelemetry(packet)
+        }
+    }
 
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
+    // Inference Pipeline
+    LaunchedEffect(Unit) {
+        gatedInferenceEngine.inferenceTriggerFlow.collect { packet ->
+            systemStatus = "Straightaway Detected - Triggering Inference"
+            isThinking = true
+            LatencyTracker.markTelemetryIngestion()
 
-    val gemmaManager = remember { Gemma4Manager(context) }
+            val packetJson = gson.toJson(packet)
+            
+            scope.launch(Dispatchers.IO) {
+                val payload = try {
+                    gemmaManager.generateCoaching(packetJson)
+                } catch (e: Exception) {
+                    CoachingPayload("Error generating insight", "NORMAL", "Unknown", 0)
+                }
 
-    DisposableEffect(Unit) {
-        onDispose { gemmaManager.close() }
+                withContext(Dispatchers.Main) {
+                    isThinking = false
+                    val latency = LatencyTracker.markAudioPlaybackStarted()
+                    val finalPayload = payload.copy(latencyMs = latency)
+                    latestCoaching = finalPayload
+                    audioDeliveryManager.deliverInstruction(finalPayload)
+                    systemStatus = "Instruction Delivered (${latency}ms)"
+                }
+            }
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-
-        // ---------- HEADER (STICKY) ----------
+        // ---------- HEADER ----------
         CenterAlignedTopAppBar(
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -173,7 +173,7 @@ fun ChatScreen() {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "GEMMA RACING",
+                        text = "GEMMA RACING DASHBOARD",
                         fontWeight = FontWeight.Black,
                         fontStyle = FontStyle.Italic
                     )
@@ -181,159 +181,95 @@ fun ChatScreen() {
             }
         )
 
-        // ---------- CHAT LIST ----------
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(messages) { message ->
-                if (message.isUser) {
-                    UserMessageBubble(message)
-                } else {
-                    AgentMessageBubble(message.text)
-                }
-            }
-
-            if (isLoading) {
-                item {
-                    AgentMessageBubble("Thinking...")
-                }
-            }
-        }
-
-        // ---------- INPUT ----------
-        Row(
+        // ---------- TELEMETRY HUD ----------
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-
-            Icon(
-                imageVector = Icons.Default.Person,
-                contentDescription = "User",
-                modifier = Modifier.size(24.dp)
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            OutlinedTextField(
-                value = inputText,
-                onValueChange = { inputText = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Pit stop... type here", fontStyle = FontStyle.Italic) },
-                enabled = !isLoading,
-                shape = MaterialTheme.shapes.small,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = CheckeredGray
-                )
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Button(
-                enabled = !isLoading,
-                shape = MaterialTheme.shapes.small,
-                onClick = {
-                    val userMessage = inputText.trim()
-                    if (userMessage.isNotEmpty()) {
-                        messages.add(ChatMessage(userMessage, true))
-                        inputText = ""
-                        isLoading = true
-
-                        scope.launch {
-                            val reply = withContext(Dispatchers.IO) {
-                                try {
-                                    gemmaManager.initialize()
-                                    gemmaManager.reply(userMessage)
-                                } catch (e: Exception) {
-                                    "Model error: ${e.message}"
-                                }
-                            }
-
-                            messages.add(ChatMessage(reply, false))
-                            isLoading = false
-                        }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                colors = CardDefaults.cardColors(containerColor = CarbonGray)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    horizontalArrangement = Arrangement.SpaceAround,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(imageVector = Icons.Default.Speed, contentDescription = "Speed", tint = TrackWhite)
+                        Text(text = "SPEED", fontSize = 12.sp, color = CheckeredGray)
+                        Text(text = "%.1f km/h".format(speed), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = RacingRed)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = "STEERING", fontSize = 12.sp, color = CheckeredGray)
+                        Text(text = "%.2f°".format(steering), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TrackWhite)
                     }
                 }
-            ) {
-                Text("GO!", fontWeight = FontWeight.ExtraBold, fontStyle = FontStyle.Italic)
-            }
-        }
-    }
-}
-
-// ---------- BUBBLES ----------
-
-@Composable
-fun UserMessageBubble(message: ChatMessage) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(horizontalAlignment = Alignment.End, modifier = Modifier.weight(1f, fill = false)) {
-            Box(
-                modifier = Modifier
-                    .background(MaterialTheme.colorScheme.primary, MaterialTheme.shapes.medium)
-                    .padding(14.dp)
-            ) {
-                Text(
-                    text = message.text,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    fontWeight = FontWeight.SemiBold
-                )
             }
         }
 
-        Spacer(modifier = Modifier.width(8.dp))
+        // ---------- STATUS & COACHING ----------
+        Spacer(modifier = Modifier.weight(1f))
 
-        Icon(
-            imageVector = Icons.Default.Person,
-            contentDescription = "Driver",
-            tint = MaterialTheme.colorScheme.onBackground
-        )
-    }
-}
-
-@Composable
-fun AgentMessageBubble(markdown: String) {
-    val context = LocalContext.current
-    val markwon = remember(context) { Markwon.create(context) }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Start,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = Icons.Default.DirectionsCar,
-            contentDescription = "Gemma",
-            tint = MaterialTheme.colorScheme.primary
-        )
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        Box(
+        Column(
             modifier = Modifier
-                .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium)
-                .padding(14.dp)
-                .weight(1f, fill = false)
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            AndroidView(
-                factory = { ctx -> 
-                    TextView(ctx).apply { 
-                        setTextColor(android.graphics.Color.WHITE) 
-                        textSize = 16f
-                    } 
-                },
-                update = { tv -> markwon.setMarkdown(tv, markdown) }
+            if (isThinking) {
+                CircularProgressIndicator(color = RacingRed)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            Text(
+                text = systemStatus,
+                color = CheckeredGray,
+                fontStyle = FontStyle.Italic,
+                fontSize = 14.sp
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            latestCoaching?.let { payload ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large,
+                    colors = CardDefaults.cardColors(containerColor = if (payload.urgency == "HIGH") RacingRed else AsphaltBlack)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = payload.targetCorner.uppercase(),
+                            color = if (payload.urgency == "HIGH") TrackWhite else RacingRed,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 18.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = payload.instruction,
+                            color = TrackWhite,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 28.sp,
+                            lineHeight = 34.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Latency: ${payload.latencyMs}ms",
+                            color = CheckeredGray,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
         }
     }
 }

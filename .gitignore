@@ -17,3 +17,4 @@ outputs/
 # Mac
 .DS_Store
 gemma-4-E2B-it.litertlm
+scratch_repos/*
