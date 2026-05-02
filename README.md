@@ -55,20 +55,60 @@ Open the project in Android Studio.
 Download the `gemma-4-E2B-it.litertlm` model and push it to the device/emulator:
 
 ```bash
+wget -O gemma-4-E2B-it.litertlm \
+https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm
 adb shell mkdir -p /data/local/tmp/llm/
 adb push gemma-4-E2B-it.litertlm /data/local/tmp/llm/gemma-4-E2B-it.litertlm
 ```
 
-### 3. Start Telemetry Simulator
+### 3. Choose Telemetry Source
+
+The dashboard has a telemetry settings panel with two source modes:
+
+- **WebSocket**: testing mode. The app receives normalized JSON packets from the
+  ApexAI server at `/ws/telemetry`.
+- **USB-C CAN**: realtime mode. The app detects attached USB devices and is the
+  integration point for direct CAN adapter frame decoding.
+
+For emulator testing, keep WebSocket set to:
+
+```text
+ws://10.0.2.2:8000/ws/telemetry
+```
+
+For a physical Android device on the same network as your laptop, use:
+
+```text
+ws://YOUR_LAPTOP_IP:8000/ws/telemetry
+```
+
+USB-C CAN mode currently discovers the attached adapter and reports status in the
+dashboard. Full direct CAN ingestion still needs the adapter-specific USB
+protocol parser that turns USB payloads into CAN frames, then maps those frames
+into `TelemetryPacket`.
+
+### 4. Start Telemetry Simulator
 
 The app connects to `ws://10.0.2.2:8000/ws/telemetry`. Start the `apexai` backend on your local host:
 
 ```bash
 cd path/to/apexai
-python -m uv run apexai-server --vbo-file data/session.vbo --loop --autostart
+uv run apexai-server --source vbo --vbo-file data/session.vbo --loop --autostart
 ```
 
-### 4. Run the app
+To test CAN-derived telemetry through the same WebSocket path:
+
+```bash
+uv run apexai-server \
+  --source can \
+  --dbc-file data/vehicle.dbc \
+  --can-interface virtual \
+  --can-channel test \
+  --stream-interval 0.1 \
+  --autostart
+```
+
+### 5. Run the app
 - Run the Android app via Android Studio or ADB.
 - The Dashboard will connect to the telemetry server and automatically start guiding the driver.
 

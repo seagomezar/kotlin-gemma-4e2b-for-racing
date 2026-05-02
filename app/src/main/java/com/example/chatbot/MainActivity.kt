@@ -9,9 +9,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -24,7 +28,9 @@ import com.example.chatbot.core.AudioDeliveryManager
 import com.example.chatbot.core.GatedInferenceEngine
 import com.example.chatbot.core.Gemma4Manager
 import com.example.chatbot.core.LatencyTracker
+import com.example.chatbot.core.TelemetryInputSource
 import com.example.chatbot.core.TelemetryManager
+import com.example.chatbot.core.TelemetrySettings
 import com.example.chatbot.models.CoachingPayload
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
@@ -98,11 +104,14 @@ fun DashboardScreen() {
     var isThinking by remember { mutableStateOf(false) }
     var latestCoaching by remember { mutableStateOf<CoachingPayload?>(null) }
     var systemStatus by remember { mutableStateOf("Initializing Gemma...") }
+    var telemetrySource by rememberSaveable { mutableStateOf(TelemetryInputSource.WEBSOCKET_TESTING) }
+    var webSocketUrl by rememberSaveable { mutableStateOf("ws://10.0.2.2:8000/ws/telemetry") }
+    var canBitrate by rememberSaveable { mutableStateOf("500000") }
+    var isTelemetryReceiving by rememberSaveable { mutableStateOf(false) }
+    var previousTelemetrySource by remember { mutableStateOf(telemetrySource) }
 
     // Lifecycle
     DisposableEffect(Unit) {
-        telemetryManager.startListening() // Connects to apexai websocket
-        
         scope.launch {
             withContext(Dispatchers.IO) {
                 gemmaManager.initialize()
@@ -114,6 +123,37 @@ fun DashboardScreen() {
             telemetryManager.stopListening()
             gemmaManager.close()
             audioDeliveryManager.shutdown()
+        }
+    }
+
+    LaunchedEffect(telemetrySource, webSocketUrl, canBitrate, isTelemetryReceiving) {
+        if (isTelemetryReceiving) {
+            val parsedBitrate = canBitrate.toIntOrNull() ?: 500_000
+            telemetryManager.startListening(
+                context,
+                TelemetrySettings(
+                    source = telemetrySource,
+                    webSocketUrl = webSocketUrl,
+                    canBitrate = parsedBitrate
+                )
+            )
+        } else {
+            telemetryManager.stopListening()
+        }
+    }
+
+    LaunchedEffect(telemetrySource) {
+        if (telemetrySource != previousTelemetrySource) {
+            isTelemetryReceiving = false
+            speed = 0.0
+            steering = 0.0
+            previousTelemetrySource = telemetrySource
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        telemetryManager.connectionStatus.collect { status ->
+            systemStatus = status
         }
     }
 
@@ -173,7 +213,7 @@ fun DashboardScreen() {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "GEMMA RACING DASHBOARD",
+                        text = "ApexAI Coaching Agent",
                         fontWeight = FontWeight.Black,
                         fontStyle = FontStyle.Italic
                     )
@@ -188,6 +228,24 @@ fun DashboardScreen() {
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            TelemetrySettingsCard(
+                source = telemetrySource,
+                webSocketUrl = webSocketUrl,
+                canBitrate = canBitrate,
+                isReceiving = isTelemetryReceiving,
+                onSourceChange = { telemetrySource = it },
+                onWebSocketUrlChange = { webSocketUrl = it },
+                onCanBitrateChange = { canBitrate = it },
+                onStart = { isTelemetryReceiving = true },
+                onStop = {
+                    isTelemetryReceiving = false
+                    speed = 0.0
+                    steering = 0.0
+                }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.medium,
@@ -269,6 +327,117 @@ fun DashboardScreen() {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TelemetrySettingsCard(
+    source: TelemetryInputSource,
+    webSocketUrl: String,
+    canBitrate: String,
+    isReceiving: Boolean,
+    onSourceChange: (TelemetryInputSource) -> Unit,
+    onWebSocketUrlChange: (String) -> Unit,
+    onCanBitrateChange: (String) -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = CarbonGray)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Telemetry settings",
+                    tint = RacingRed
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Telemetry Source",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 16.sp
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = onStart,
+                    enabled = !isReceiving,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Start receiving")
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Start")
+                }
+                OutlinedButton(
+                    onClick = onStop,
+                    enabled = isReceiving,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(imageVector = Icons.Default.Stop, contentDescription = "Stop receiving")
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Stop")
+                }
+            }
+
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                AssistChip(
+                    onClick = {},
+                    label = { Text(if (isReceiving) "Receiving enabled" else "Receiving stopped") },
+                    colors = AssistChipDefaults.assistChipColors(
+                        labelColor = if (isReceiving) RacingRed else CheckeredGray
+                    )
+                )
+            }
+
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                SegmentedButton(
+                    selected = source == TelemetryInputSource.WEBSOCKET_TESTING,
+                    onClick = { onSourceChange(TelemetryInputSource.WEBSOCKET_TESTING) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    label = { Text("WebSocket") }
+                )
+                SegmentedButton(
+                    selected = source == TelemetryInputSource.USB_CAN_REALTIME,
+                    onClick = { onSourceChange(TelemetryInputSource.USB_CAN_REALTIME) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    label = { Text("USB-C CAN") }
+                )
+            }
+
+            if (source == TelemetryInputSource.WEBSOCKET_TESTING) {
+                OutlinedTextField(
+                    value = webSocketUrl,
+                    onValueChange = onWebSocketUrlChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("WebSocket URL") },
+                    singleLine = true,
+                    supportingText = { Text("Use 10.0.2.2 for emulator localhost, or laptop IP for a phone.") }
+                )
+            } else {
+                OutlinedTextField(
+                    value = canBitrate,
+                    onValueChange = { value -> onCanBitrateChange(value.filter(Char::isDigit)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("CAN bitrate") },
+                    singleLine = true,
+                    supportingText = { Text("USB-C mode detects adapters now; frame decoding depends on adapter protocol.") }
+                )
             }
         }
     }
