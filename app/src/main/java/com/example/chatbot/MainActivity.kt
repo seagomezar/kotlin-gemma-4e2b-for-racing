@@ -1,17 +1,25 @@
 package com.example.kotlin_chatbot
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -24,6 +32,7 @@ import com.example.chatbot.core.AudioDeliveryManager
 import com.example.chatbot.core.GatedInferenceEngine
 import com.example.chatbot.core.Gemma4Manager
 import com.example.chatbot.core.LatencyTracker
+import com.example.chatbot.core.MemoryBankManager
 import com.example.chatbot.core.TelemetryManager
 import com.example.chatbot.models.CoachingPayload
 import com.google.gson.Gson
@@ -90,7 +99,9 @@ fun DashboardScreen() {
     val gatedInferenceEngine = remember { GatedInferenceEngine() }
     val gemmaManager = remember { Gemma4Manager(context) }
     val audioDeliveryManager = remember { AudioDeliveryManager(context) }
+    val memoryBankManager = remember { MemoryBankManager(context) }
     val gson = remember { Gson() }
+    val sharedPrefs = remember { context.getSharedPreferences("RacingPrefs", Context.MODE_PRIVATE) }
 
     // State
     var speed by remember { mutableStateOf(0.0) }
@@ -98,6 +109,27 @@ fun DashboardScreen() {
     var isThinking by remember { mutableStateOf(false) }
     var latestCoaching by remember { mutableStateOf<CoachingPayload?>(null) }
     var systemStatus by remember { mutableStateOf("Initializing Gemma...") }
+    
+    // Navigation & Memory Bank State
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) } // 0: AI Coach, 1: Memory Bank
+    var activeSectorId by remember { mutableStateOf<Int?>(null) }
+    var csvLoaded by remember { mutableStateOf(false) }
+    var sessionActive by rememberSaveable { mutableStateOf(false) }
+
+    val csvPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: Exception) { }
+            
+            sharedPrefs.edit().putString("csv_uri", it.toString()).apply()
+            memoryBankManager.loadCsvRules(it)
+            csvLoaded = true
+        }
+    }
 
     // Lifecycle
     DisposableEffect(Unit) {
@@ -117,21 +149,42 @@ fun DashboardScreen() {
         }
     }
 
-    // Telemetry Pipeline
+    // Load persisted CSV
     LaunchedEffect(Unit) {
+        val savedUri = sharedPrefs.getString("csv_uri", null)
+        if (savedUri != null) {
+            try {
+                memoryBankManager.loadCsvRules(Uri.parse(savedUri))
+                csvLoaded = true
+            } catch (e: Exception) { }
+        }
+    }
+
+    // Telemetry Pipeline
+    LaunchedEffect(selectedTab, sessionActive) {
         telemetryManager.telemetryFlow.collect { packet ->
             // Update UI
             speed = packet.speed ?: 0.0
             steering = packet.steering ?: 0.0
             
-            // Route to Engine
-            gatedInferenceEngine.processTelemetry(packet)
+            if (sessionActive) {
+                if (selectedTab == 0) {
+                    // Route to AI Coach Engine
+                    gatedInferenceEngine.processTelemetry(packet)
+                } else {
+                    // Route to Memory Bank
+                    memoryBankManager.processTelemetry(packet)
+                    activeSectorId = memoryBankManager.getCurrentSegmentId()
+                }
+            }
         }
     }
 
-    // Inference Pipeline
+    // AI Coach Inference Pipeline
     LaunchedEffect(Unit) {
         gatedInferenceEngine.inferenceTriggerFlow.collect { packet ->
+            if (selectedTab != 0) return@collect
+            
             systemStatus = "Straightaway Detected - Triggering Inference"
             isThinking = true
             LatencyTracker.markTelemetryIngestion()
@@ -157,116 +210,203 @@ fun DashboardScreen() {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // ---------- HEADER ----------
-        CenterAlignedTopAppBar(
-            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                titleContentColor = MaterialTheme.colorScheme.primary
-            ),
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.DirectionsCar,
-                        contentDescription = "Gemma Racing",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "GEMMA RACING DASHBOARD",
-                        fontWeight = FontWeight.Black,
-                        fontStyle = FontStyle.Italic
-                    )
-                }
-            }
-        )
+    // Memory Bank Inference Pipeline
+    LaunchedEffect(Unit) {
+        memoryBankManager.coachingFlow.collect { payload ->
+            if (selectedTab != 1) return@collect
+            latestCoaching = payload
+            audioDeliveryManager.deliverInstruction(payload)
+        }
+    }
 
-        // ---------- TELEMETRY HUD ----------
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium,
-                colors = CardDefaults.cardColors(containerColor = CarbonGray)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalArrangement = Arrangement.SpaceAround,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(imageVector = Icons.Default.Speed, contentDescription = "Speed", tint = TrackWhite)
-                        Text(text = "SPEED", fontSize = 12.sp, color = CheckeredGray)
-                        Text(text = "%.1f km/h".format(speed), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = RacingRed)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "STEERING", fontSize = 12.sp, color = CheckeredGray)
-                        Text(text = "%.2f°".format(steering), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TrackWhite)
-                    }
-                }
+    Scaffold(
+        bottomBar = {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+                NavigationBarItem(
+                    selected = selectedTab == 0,
+                    onClick = { 
+                        selectedTab = 0 
+                        latestCoaching = null 
+                    },
+                    icon = { Icon(Icons.Default.SmartToy, contentDescription = "AI Coach") },
+                    label = { Text("AI Coach") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                        unselectedIconColor = CheckeredGray,
+                        indicatorColor = MaterialTheme.colorScheme.background
+                    )
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 1,
+                    onClick = { 
+                        selectedTab = 1 
+                        latestCoaching = null 
+                    },
+                    icon = { Icon(Icons.Default.Memory, contentDescription = "Memory Bank") },
+                    label = { Text("Memory Bank") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                        unselectedIconColor = CheckeredGray,
+                        indicatorColor = MaterialTheme.colorScheme.background
+                    )
+                )
             }
         }
-
-        // ---------- STATUS & COACHING ----------
-        Spacer(modifier = Modifier.weight(1f))
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            if (isThinking) {
-                CircularProgressIndicator(color = RacingRed)
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            Text(
-                text = systemStatus,
-                color = CheckeredGray,
-                fontStyle = FontStyle.Italic,
-                fontSize = 14.sp
+    ) { innerPadding ->
+        Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            // ---------- HEADER ----------
+            CenterAlignedTopAppBar(
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    titleContentColor = MaterialTheme.colorScheme.primary
+                ),
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.DirectionsCar,
+                            contentDescription = "Gemma Racing",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "GEMMA RACING DASHBOARD",
+                            fontWeight = FontWeight.Black,
+                            fontStyle = FontStyle.Italic
+                        )
+                    }
+                }
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            latestCoaching?.let { payload ->
+            // ---------- TELEMETRY HUD ----------
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.large,
-                    colors = CardDefaults.cardColors(containerColor = if (payload.urgency == "HIGH") RacingRed else AsphaltBlack)
+                    shape = MaterialTheme.shapes.medium,
+                    colors = CardDefaults.cardColors(containerColor = CarbonGray)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalArrangement = Arrangement.SpaceAround,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(imageVector = Icons.Default.Speed, contentDescription = "Speed", tint = TrackWhite)
+                            Text(text = "SPEED", fontSize = 12.sp, color = CheckeredGray)
+                            Text(text = "%.1f km/h".format(speed), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = RacingRed)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(text = "STEERING", fontSize = 12.sp, color = CheckeredGray)
+                            Text(text = "%.2f°".format(steering), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TrackWhite)
+                        }
+                    }
+                }
+            }
+
+            // ---------- STATUS & COACHING ----------
+            Spacer(modifier = Modifier.weight(1f))
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Button(
+                    onClick = { 
+                        sessionActive = !sessionActive
+                        if (!sessionActive) latestCoaching = null
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (sessionActive) CarbonGray else RacingRed
+                    ),
+                    modifier = Modifier.padding(bottom = 16.dp).fillMaxWidth()
+                ) {
+                    Text(if (sessionActive) "STOP COACHING SESSION" else "START COACHING SESSION", color = TrackWhite, fontWeight = FontWeight.Bold)
+                }
+
+                if (selectedTab == 1) {
+                    // Memory Bank specific UI
+                    Button(
+                        onClick = { csvPickerLauncher.launch("*/*") },
+                        colors = ButtonDefaults.buttonColors(containerColor = CarbonGray),
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    ) {
+                        Text("Upload/Change CSV", color = TrackWhite)
+                    }
+
+                    if (csvLoaded) {
+                        val statusText = if (activeSectorId != null) {
+                            "Monitoring Sector $activeSectorId"
+                        } else {
+                            "Waiting for Track Coordinates..."
+                        }
                         Text(
-                            text = payload.targetCorner.uppercase(),
-                            color = if (payload.urgency == "HIGH") TrackWhite else RacingRed,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 18.sp
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = payload.instruction,
-                            color = TrackWhite,
+                            text = statusText,
+                            color = RacingRed,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 28.sp,
-                            lineHeight = 34.sp,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            fontSize = 16.sp
                         )
+                    } else {
+                        Text("No CSV Rules Loaded", color = CheckeredGray)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                } else {
+                    // AI Coach specific UI
+                    if (isThinking) {
+                        CircularProgressIndicator(color = RacingRed)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Latency: ${payload.latencyMs}ms",
-                            color = CheckeredGray,
-                            fontSize = 12.sp
-                        )
+                    }
+
+                    Text(
+                        text = systemStatus,
+                        color = CheckeredGray,
+                        fontStyle = FontStyle.Italic,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                latestCoaching?.let { payload ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.large,
+                        colors = CardDefaults.cardColors(containerColor = if (payload.urgency == "HIGH") RacingRed else AsphaltBlack)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = payload.targetCorner.uppercase(),
+                                color = if (payload.urgency == "HIGH") TrackWhite else RacingRed,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 18.sp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = payload.instruction,
+                                color = TrackWhite,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 28.sp,
+                                lineHeight = 34.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            if (payload.latencyMs > 0) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "Latency: ${payload.latencyMs}ms",
+                                    color = CheckeredGray,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
                     }
                 }
             }

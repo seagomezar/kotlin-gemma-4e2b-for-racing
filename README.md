@@ -34,11 +34,14 @@ This repository serves as the unified edge architecture intended to pass the *Fi
 
 ## Features
 
+- **Dual-Tab Dashboard:** Switch between "AI Coach" (predictive LLM) and "Memory Bank" (deterministic rule-based) coaching modes.
+- **Memory Bank Coaching:** Upload customized `.csv` rule sets to trigger deterministic coaching advice based on sector boundary telemetry metrics (e.g. minimum speed, coasting time).
+- **Session Control:** Explicit "Start/Stop Coaching Session" controls to manage telemetry processing and active coaching.
 - **Telemetry Dashboard:** Live speed and steering tracking built with Jetpack Compose (Material 3).
 - **Gated Inference Engine:** Real-time steering variance monitoring to ensure LLM inference is only triggered during straightaways, maintaining thermal stability.
 - **On-device Coaching:** Fully offline inference using Google's LiteRT-LM and Gemma 4:E2B.
 - **Audio Delivery:** Strict JSON-formatted instructions mapped into prioritized TextToSpeech cues for the driver.
-- **ApexAI Integration:** Connects automatically to local Racelogic VBOX simulator backends.
+- **ApexAI Integration:** Connects automatically to cloud Server-Sent Events (SSE) telemetry backends.
 
 ## Setup
 
@@ -61,16 +64,20 @@ adb push gemma-4-E2B-it.litertlm /data/local/tmp/llm/gemma-4-E2B-it.litertlm
 
 ### 3. Start Telemetry Simulator
 
-The app connects to `ws://10.0.2.2:8000/ws/telemetry`. Start the `apexai` backend on your local host:
+The app connects to the ApexAI Server-Sent Events (SSE) endpoint at `https://apexai-812524149286.us-central1.run.app/events/telemetry`. If you are running a local simulator, you can update the `startListening()` URL in `TelemetryManager.kt`.
+
+### 4. Load Memory Bank Rules (Optional)
+
+To use the deterministic Memory Bank mode, push your `coaching_recommendations.csv` to your device:
 
 ```bash
-cd path/to/apexai
-python -m uv run apexai-server --vbo-file data/session.vbo --loop --autostart
+adb push "coaching_recommendations (1).csv" /sdcard/Download/coaching_recommendations.csv
 ```
+Inside the app, switch to the **Memory Bank** tab, click **Upload/Change CSV**, and select the file to load the rule set.
 
-### 4. Run the app
+### 5. Run the app
 - Run the Android app via Android Studio or ADB.
-- The Dashboard will connect to the telemetry server and automatically start guiding the driver.
+- Click **Start Coaching Session** to begin receiving real-time racing advice.
 
 ## Tech Stack
 - Kotlin & Jetpack Compose

@@ -9,8 +9,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
+import okhttp3.sse.EventSource
+import okhttp3.sse.EventSourceListener
+import okhttp3.sse.EventSources
 import java.util.concurrent.TimeUnit
 
 class TelemetryManager {
@@ -19,42 +20,49 @@ class TelemetryManager {
         .build()
         
     private val gson = Gson()
-    private var webSocket: WebSocket? = null
+    private var eventSource: EventSource? = null
 
     private val _telemetryFlow = MutableSharedFlow<TelemetryPacket>(replay = 1)
     val telemetryFlow: SharedFlow<TelemetryPacket> = _telemetryFlow.asSharedFlow()
 
-    fun startListening(url: String = "ws://10.0.2.2:8000/ws/telemetry") {
-        // We use 10.0.2.2 as the default for Android Emulator accessing host localhost
-        val request = Request.Builder().url(url).build()
+    fun startListening(url: String = "https://apexai-812524149286.us-central1.run.app/events/telemetry") {
+        val request = Request.Builder()
+            .url(url)
+            .header("Accept", "text/event-stream")
+            .build()
         
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d("TelemetryManager", "WebSocket Connected")
+        val factory = EventSources.createFactory(client)
+        eventSource = factory.newEventSource(request, object : EventSourceListener() {
+            override fun onOpen(eventSource: EventSource, response: Response) {
+                Log.d("TelemetryManager", "SSE Connected")
             }
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
+            override fun onEvent(
+                eventSource: EventSource,
+                id: String?,
+                type: String?,
+                data: String
+            ) {
                 try {
-                    val packet = gson.fromJson(text, TelemetryPacket::class.java)
+                    val packet = gson.fromJson(data, TelemetryPacket::class.java)
                     _telemetryFlow.tryEmit(packet)
                 } catch (e: Exception) {
                     Log.e("TelemetryManager", "Error parsing packet", e)
                 }
             }
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.d("TelemetryManager", "WebSocket Closed: $reason")
+            override fun onClosed(eventSource: EventSource) {
+                Log.d("TelemetryManager", "SSE Closed")
             }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e("TelemetryManager", "WebSocket Failure", t)
-                // Implement reconnect logic if necessary
+            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                Log.e("TelemetryManager", "SSE Failure", t)
             }
         })
     }
 
     fun stopListening() {
-        webSocket?.close(1000, "User requested stop")
-        webSocket = null
+        eventSource?.cancel()
+        eventSource = null
     }
 }

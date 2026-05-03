@@ -26,3 +26,36 @@ data class CoachingPayload(
     val targetCorner: String = "Unknown",
     val latencyMs: Long = 0
 )
+
+data class TrackSectorPoint(
+    val lat: Double,
+    val long: Double,
+    val segment_id: Int
+)
+
+data class CoachingRecommendation(
+    val type: String,
+    val sector_id: Int,
+    val start_lat: Double,
+    val start_long: Double,
+    val end_lat: Double,
+    val end_long: Double,
+    val tag: String,
+    val title: String,
+    val description: String,
+    val metric: String,
+    val threshold: Double,
+    val optimal_value: Double
+)
+
+data class SectorMetrics(
+    var minSpeed: Double = Double.MAX_VALUE,
+    var coastingTime: Double = 0.0,
+    var throttleStartPercent: Double? = null,
+    var startTime: Double = 0.0,
+    var lastTimestamp: Double = 0.0,
+    var distanceTraveled: Double = 0.0,
+    var lastLat: Double? = null,
+    var lastLong: Double? = null,
+    var totalSectorDistance: Double? = null // Pre-calculated from CSV start to end
+)
