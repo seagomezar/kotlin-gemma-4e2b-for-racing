@@ -1,11 +1,27 @@
 # Sonoma Racing Coach (Edge Integration)
 
-![Dashboard Waiting for Telemetry](https://raw.githubusercontent.com/seagomezar/sonoma-racing-coach/main/images/dashboard_waiting.png)
-![Dashboard Active Coaching](https://raw.githubusercontent.com/seagomezar/sonoma-racing-coach/main/images/dashboard_active.png)
-
 A Kotlin-based Android edge application powered by the **Gemma 4:E2B** model running entirely on-device to deliver predictive, actionable insights to a professional racing driver in real-time. 
 
 This app ingests live high-frequency `.vbo` telemetry (steering, speed, etc.) from the **ApexAI** racing simulator backend over WebSockets, analyzes driving behavior, and uses LLM-powered inference to generate context-aware coaching feedback through text-to-speech.
+
+---
+
+## 🏎️ AI Coach Mode (Gemma Inference)
+The AI Coach relies on real-time LLM inference (Gemma 4:E2B) to analyze driving behavior and dynamically predict optimal adjustments.
+
+<div style="display: flex; flex-direction: row; gap: 10px;">
+  <img src="https://raw.githubusercontent.com/seagomezar/sonoma-racing-coach/main/images/dashboard_waiting.png" width="30%" />
+  <img src="https://raw.githubusercontent.com/seagomezar/sonoma-racing-coach/main/images/dashboard_active.png" width="30%" />
+  <img src="https://raw.githubusercontent.com/seagomezar/sonoma-racing-coach/main/images/Screenshot_1777831770.png" width="30%" />
+</div>
+
+## 🧠 Memory Bank Mode
+The Memory Bank uses a deterministic rule-based engine. It continuously tracks sector boundary telemetry (min speed, coasting time) and triggers alerts based on a driver's customized `.csv` profile.
+
+<div style="display: flex; flex-direction: row; gap: 10px;">
+  <img src="https://raw.githubusercontent.com/seagomezar/sonoma-racing-coach/main/images/Screenshot_1777832922.png" width="30%" />
+  <img src="https://raw.githubusercontent.com/seagomezar/sonoma-racing-coach/main/images/Screenshot_1777832944.png" width="30%" />
+</div>
 
 ---
 
