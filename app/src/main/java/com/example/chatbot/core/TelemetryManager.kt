@@ -2,6 +2,8 @@ package com.example.chatbot.core
 
 import android.content.Context
 import android.hardware.usb.UsbManager
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.example.chatbot.models.TelemetryPacket
 import com.google.gson.Gson
@@ -14,6 +16,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import android.os.SystemClock
 import java.util.concurrent.TimeUnit
 
 enum class TelemetryInputSource {
@@ -28,12 +31,42 @@ data class TelemetrySettings(
 )
 
 class TelemetryManager {
+    private companion object {
+        const val STALE_TELEMETRY_TIMEOUT_MS = 8_000L
+        const val STALE_TELEMETRY_CHECK_MS = 2_000L
+        const val RECONNECT_DELAY_MS = 2_000L
+    }
+
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        .pingInterval(15, TimeUnit.SECONDS)
         .build()
         
     private val gson = Gson()
     private var webSocket: WebSocket? = null
+    private val reconnectHandler = Handler(Looper.getMainLooper())
+    private val staleTelemetryHandler = Handler(Looper.getMainLooper())
+    private var shouldReconnect = false
+    private var reconnectUrl: String? = null
+    private var lastTelemetryAtMs = 0L
+    private val staleTelemetryCheck = object : Runnable {
+        override fun run() {
+            if (!shouldReconnect) {
+                return
+            }
+
+            val lastPacketAgeMs = SystemClock.elapsedRealtime() - lastTelemetryAtMs
+            if (lastTelemetryAtMs > 0 && lastPacketAgeMs > STALE_TELEMETRY_TIMEOUT_MS) {
+                _connectionStatus.tryEmit("Telemetry stale, reconnecting...")
+                Log.w("TelemetryManager", "Telemetry stale for ${lastPacketAgeMs}ms; reconnecting")
+                webSocket?.cancel()
+                scheduleReconnect()
+                return
+            }
+
+            staleTelemetryHandler.postDelayed(this, STALE_TELEMETRY_CHECK_MS)
+        }
+    }
 
     private val _telemetryFlow = MutableSharedFlow<TelemetryPacket>(replay = 1)
     val telemetryFlow: SharedFlow<TelemetryPacket> = _telemetryFlow.asSharedFlow()
@@ -44,7 +77,10 @@ class TelemetryManager {
     fun startListening(context: Context, settings: TelemetrySettings = TelemetrySettings()) {
         stopListening()
         when (settings.source) {
-            TelemetryInputSource.WEBSOCKET_TESTING -> startWebSocket(settings.webSocketUrl)
+            TelemetryInputSource.WEBSOCKET_TESTING -> {
+                shouldReconnect = true
+                startWebSocket(settings.webSocketUrl)
+            }
             TelemetryInputSource.USB_CAN_REALTIME -> startUsbCan(context, settings.canBitrate)
         }
     }
@@ -53,14 +89,18 @@ class TelemetryManager {
         // We use 10.0.2.2 as the default for Android Emulator accessing host localhost
         val normalizedUrl = normalizeWebSocketUrl(url)
         if (normalizedUrl == null) {
+            shouldReconnect = false
             _connectionStatus.tryEmit("Invalid WebSocket URL. Use ws://host:port/path")
             Log.w("TelemetryManager", "Invalid WebSocket URL: $url")
             return
         }
+        reconnectUrl = normalizedUrl
+        lastTelemetryAtMs = SystemClock.elapsedRealtime()
 
         val request = try {
             Request.Builder().url(normalizedUrl).build()
         } catch (e: IllegalArgumentException) {
+            shouldReconnect = false
             _connectionStatus.tryEmit("Invalid WebSocket URL: ${e.message ?: "check the address"}")
             Log.e("TelemetryManager", "Invalid WebSocket URL: $url", e)
             return
@@ -70,12 +110,16 @@ class TelemetryManager {
             client.newWebSocket(request, object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     Log.d("TelemetryManager", "WebSocket Connected")
+                    lastTelemetryAtMs = SystemClock.elapsedRealtime()
+                    staleTelemetryHandler.removeCallbacks(staleTelemetryCheck)
+                    staleTelemetryHandler.postDelayed(staleTelemetryCheck, STALE_TELEMETRY_CHECK_MS)
                     _connectionStatus.tryEmit("WebSocket connected")
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     try {
                         val packet = gson.fromJson(text, TelemetryPacket::class.java)
+                        lastTelemetryAtMs = SystemClock.elapsedRealtime()
                         _telemetryFlow.tryEmit(packet)
                     } catch (e: Exception) {
                         Log.e("TelemetryManager", "Error parsing packet", e)
@@ -86,12 +130,13 @@ class TelemetryManager {
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     Log.d("TelemetryManager", "WebSocket Closed: $reason")
                     _connectionStatus.tryEmit("WebSocket closed: $reason")
+                    scheduleReconnect()
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     Log.e("TelemetryManager", "WebSocket Failure", t)
                     _connectionStatus.tryEmit("WebSocket failure: ${t.message ?: "unknown error"}")
-                    // Implement reconnect logic if necessary
+                    scheduleReconnect()
                 }
             })
         } catch (e: RuntimeException) {
@@ -99,6 +144,26 @@ class TelemetryManager {
             Log.e("TelemetryManager", "Could not start WebSocket", e)
             null
         }
+    }
+
+    private fun scheduleReconnect() {
+        val url = reconnectUrl
+        if (!shouldReconnect || url == null) {
+            return
+        }
+
+        webSocket = null
+        reconnectHandler.removeCallbacksAndMessages(null)
+        staleTelemetryHandler.removeCallbacks(staleTelemetryCheck)
+        _connectionStatus.tryEmit("WebSocket reconnecting...")
+        reconnectHandler.postDelayed(
+            {
+                if (shouldReconnect) {
+                    startWebSocket(url)
+                }
+            },
+            2_000
+        )
     }
 
     private fun normalizeWebSocketUrl(url: String): String? {
@@ -121,6 +186,8 @@ class TelemetryManager {
     }
 
     private fun startUsbCan(context: Context, bitrate: Int) {
+        shouldReconnect = false
+        reconnectUrl = null
         val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
         val devices = usbManager.deviceList.values.toList()
 
@@ -145,6 +212,10 @@ class TelemetryManager {
     }
 
     fun stopListening() {
+        shouldReconnect = false
+        reconnectUrl = null
+        reconnectHandler.removeCallbacksAndMessages(null)
+        staleTelemetryHandler.removeCallbacks(staleTelemetryCheck)
         webSocket?.close(1000, "User requested stop")
         webSocket = null
         _connectionStatus.tryEmit("Telemetry stopped")
