@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
 
