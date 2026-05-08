@@ -251,7 +251,7 @@ fun DashboardScreen() {
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             // ---------- HEADER ----------
             CenterAlignedTopAppBar(
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                     titleContentColor = MaterialTheme.colorScheme.primary
                 ),
@@ -349,7 +349,7 @@ fun DashboardScreen() {
                                     focusedTextColor = TrackWhite,
                                     unfocusedTextColor = TrackWhite
                                 ),
-                                modifier = Modifier.menuAnchor()
+                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                             )
                             ExposedDropdownMenu(
                                 expanded = dropdownExpanded,
