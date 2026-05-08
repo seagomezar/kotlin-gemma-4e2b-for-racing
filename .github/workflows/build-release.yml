@@ -32,6 +32,7 @@ jobs:
 
       - name: Sign Release APK
         id: sign_app
+        if: ${{ secrets.KEYSTORE_B64 != '' }}
         uses: r0adkll/sign-android-release@v1
         with:
           releaseDirectory: app/build/outputs/apk/release
@@ -52,7 +53,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: ${{steps.sign_app.outputs.signedReleaseFile}}
+          path: app/build/outputs/apk/release/*.apk
 
       - name: Create Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -62,6 +63,6 @@ jobs:
           tag_name: release-${{ github.sha }}
           files: |
             app/build/outputs/apk/debug/app-debug.apk
-            ${{steps.sign_app.outputs.signedReleaseFile}}
+            app/build/outputs/apk/release/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
