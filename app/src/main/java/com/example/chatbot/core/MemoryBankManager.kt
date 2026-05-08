@@ -13,8 +13,14 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
+import com.example.chatbot.models.CoachingRulesResponse
+import com.example.chatbot.models.GcsObjectsResponse
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -23,6 +29,7 @@ import kotlin.math.sqrt
 class MemoryBankManager(private val context: Context) {
 
     private val gson = Gson()
+    private val client = OkHttpClient()
     private var trackSectors: List<TrackSectorPoint> = emptyList()
     private var rules: Map<Int, List<CoachingRecommendation>> = emptyMap()
 
@@ -47,43 +54,74 @@ class MemoryBankManager(private val context: Context) {
         }
     }
 
-    fun loadCsvRules(uri: Uri) {
-        try {
-            val recommendations = mutableListOf<CoachingRecommendation>()
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                BufferedReader(InputStreamReader(inputStream)).use { reader ->
-                    var isFirstLine = true
-                    reader.forEachLine { line ->
-                        if (isFirstLine) {
-                            isFirstLine = false
-                            return@forEachLine
-                        }
-                        val tokens = line.split(",")
-                        if (tokens.size >= 12) {
-                            val rec = CoachingRecommendation(
-                                type = tokens[0].trim(),
-                                sector_id = tokens[1].trim().toIntOrNull() ?: 0,
-                                start_lat = tokens[2].trim().toDoubleOrNull() ?: 0.0,
-                                start_long = tokens[3].trim().toDoubleOrNull() ?: 0.0,
-                                end_lat = tokens[4].trim().toDoubleOrNull() ?: 0.0,
-                                end_long = tokens[5].trim().toDoubleOrNull() ?: 0.0,
-                                tag = tokens[6].trim(),
-                                title = tokens[7].trim(),
-                                description = tokens[8].trim(),
-                                metric = tokens[9].trim(),
-                                threshold = tokens[10].trim().toDoubleOrNull() ?: 0.0,
-                                optimal_value = tokens[11].trim().toDoubleOrNull() ?: 0.0
-                            )
-                            recommendations.add(rec)
-                        }
+    fun fetchAvailableFiles(onComplete: (List<String>) -> Unit) {
+        val url = "https://storage.googleapis.com/storage/v1/b/public-race-coaching/o"
+        val request = Request.Builder().url(url).build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e("MemoryBankManager", "Failed to fetch files list", e)
+                onComplete(emptyList())
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                if (!response.isSuccessful) {
+                    Log.e("MemoryBankManager", "Unexpected code $response")
+                    onComplete(emptyList())
+                    return
+                }
+
+                try {
+                    val responseBody = response.body?.string()
+                    if (responseBody != null) {
+                        val gcsResponse = gson.fromJson(responseBody, GcsObjectsResponse::class.java)
+                        val files = gcsResponse.items?.map { it.name }?.filter { it.endsWith(".json") } ?: emptyList()
+                        Log.d("MemoryBankManager", "Loaded ${files.size} available files")
+                        onComplete(files)
+                    } else {
+                        onComplete(emptyList())
                     }
+                } catch (e: Exception) {
+                    Log.e("MemoryBankManager", "Failed to parse files list", e)
+                    onComplete(emptyList())
                 }
             }
-            rules = recommendations.groupBy { it.sector_id }
-            Log.d("MemoryBankManager", "Loaded ${recommendations.size} rules from CSV")
-        } catch (e: Exception) {
-            Log.e("MemoryBankManager", "Failed to load CSV rules", e)
-        }
+        })
+    }
+
+    fun fetchRules(filePath: String, onComplete: (Boolean) -> Unit) {
+        val url = "https://storage.googleapis.com/public-race-coaching/$filePath"
+        val request = Request.Builder().url(url).build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e("MemoryBankManager", "Failed to fetch rules", e)
+                onComplete(false)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                if (!response.isSuccessful) {
+                    Log.e("MemoryBankManager", "Unexpected code $response")
+                    onComplete(false)
+                    return
+                }
+
+                try {
+                    val responseBody = response.body?.string()
+                    if (responseBody != null) {
+                        val rulesResponse = gson.fromJson(responseBody, CoachingRulesResponse::class.java)
+                        rules = rulesResponse.coachingRules.groupBy { it.sector_id }
+                        Log.d("MemoryBankManager", "Loaded ${rulesResponse.coachingRules.size} rules from GCS")
+                        onComplete(true)
+                    } else {
+                        onComplete(false)
+                    }
+                } catch (e: Exception) {
+                    Log.e("MemoryBankManager", "Failed to parse JSON", e)
+                    onComplete(false)
+                }
+            }
+        })
     }
 
     fun processTelemetry(packet: TelemetryPacket) {
@@ -100,9 +138,7 @@ class MemoryBankManager(private val context: Context) {
             // Start new sector
             currentSegmentId = newSegmentId
             val sectorRules = rules[newSegmentId]
-            val totalDistance = sectorRules?.firstOrNull()?.let {
-                haversineDistance(it.start_lat, it.start_long, it.end_lat, it.end_long)
-            }
+            val totalDistance = calculateSectorDistance(newSegmentId)
             
             currentMetrics = SectorMetrics(
                 minSpeed = packet.speed ?: Double.MAX_VALUE,
@@ -166,22 +202,27 @@ class MemoryBankManager(private val context: Context) {
             var triggered = false
             when (rule.metric) {
                 "min_speed" -> {
-                    if (currentMetrics.minSpeed < rule.threshold) triggered = true
+                    if (rule.operator == "<" && currentMetrics.minSpeed < rule.threshold) triggered = true
+                    else if (rule.operator == ">" && currentMetrics.minSpeed > rule.threshold) triggered = true
                 }
                 "coasting_time" -> {
-                    if (currentMetrics.coastingTime > rule.threshold) triggered = true
+                    if (rule.operator == "<" && currentMetrics.coastingTime < rule.threshold) triggered = true
+                    else if (rule.operator == ">" && currentMetrics.coastingTime > rule.threshold) triggered = true
                 }
                 "throttle_start_percent" -> {
-                    if ((currentMetrics.throttleStartPercent ?: 1.0) > rule.threshold) triggered = true
+                    val value = currentMetrics.throttleStartPercent ?: 1.0
+                    if (rule.operator == "<" && value < rule.threshold) triggered = true
+                    else if (rule.operator == ">" && value > rule.threshold) triggered = true
                 }
             }
 
             if (triggered) {
                 val payload = CoachingPayload(
                     instruction = rule.description,
-                    urgency = if (rule.type == "Physics") "HIGH" else "NORMAL",
+                    urgency = "HIGH", // JSON rules don't specify type, assume HIGH for all Memory Bank rules to trigger
                     targetCorner = "Sector $segmentId - ${rule.title}",
-                    latencyMs = 0
+                    latencyMs = 0,
+                    audioFile = rule.audio_file
                 )
                 _coachingFlow.tryEmit(payload)
                 break // Only emit one advice per sector
@@ -210,6 +251,16 @@ class MemoryBankManager(private val context: Context) {
             }
         }
         return nearest
+    }
+
+    private fun calculateSectorDistance(segmentId: Int): Double {
+        val points = trackSectors.filter { it.segment_id == segmentId }
+        if (points.size < 2) return 0.0
+        var dist = 0.0
+        for (i in 0 until points.size - 1) {
+            dist += haversineDistance(points[i].lat, points[i].long, points[i+1].lat, points[i+1].long)
+        }
+        return dist
     }
 
     private fun haversineDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {

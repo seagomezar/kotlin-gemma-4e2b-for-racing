@@ -109,27 +109,18 @@ fun DashboardScreen() {
     var isThinking by remember { mutableStateOf(false) }
     var latestCoaching by remember { mutableStateOf<CoachingPayload?>(null) }
     var systemStatus by remember { mutableStateOf("Initializing Gemma...") }
-    
+
     // Navigation & Memory Bank State
     var selectedTab by rememberSaveable { mutableIntStateOf(0) } // 0: AI Coach, 1: Memory Bank
     var activeSectorId by remember { mutableStateOf<Int?>(null) }
-    var csvLoaded by remember { mutableStateOf(false) }
+    var rulesLoaded by remember { mutableStateOf(false) }
+    var isFetchingRules by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var availableFiles by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isFetchingFiles by remember { mutableStateOf(false) }
+    var selectedFile by rememberSaveable { mutableStateOf<String?>(null) }
+    var dropdownExpanded by remember { mutableStateOf(false) }
     var sessionActive by rememberSaveable { mutableStateOf(false) }
-
-    val csvPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    it,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (e: Exception) { }
-            
-            sharedPrefs.edit().putString("csv_uri", it.toString()).apply()
-            memoryBankManager.loadCsvRules(it)
-            csvLoaded = true
-        }
-    }
 
     // Lifecycle
     DisposableEffect(Unit) {
@@ -149,14 +140,18 @@ fun DashboardScreen() {
         }
     }
 
-    // Load persisted CSV
-    LaunchedEffect(Unit) {
-        val savedUri = sharedPrefs.getString("csv_uri", null)
-        if (savedUri != null) {
-            try {
-                memoryBankManager.loadCsvRules(Uri.parse(savedUri))
-                csvLoaded = true
-            } catch (e: Exception) { }
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 1 && availableFiles.isEmpty()) {
+            isFetchingFiles = true
+            memoryBankManager.fetchAvailableFiles { files ->
+                scope.launch(Dispatchers.Main) {
+                    isFetchingFiles = false
+                    availableFiles = files
+                    if (files.isNotEmpty() && selectedFile == null) {
+                        selectedFile = files.first()
+                    }
+                }
+            }
         }
     }
 
@@ -333,15 +328,74 @@ fun DashboardScreen() {
 
                 if (selectedTab == 1) {
                     // Memory Bank specific UI
-                    Button(
-                        onClick = { csvPickerLauncher.launch("*/*") },
-                        colors = ButtonDefaults.buttonColors(containerColor = CarbonGray),
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    ) {
-                        Text("Upload/Change CSV", color = TrackWhite)
+                    
+                    if (isFetchingFiles) {
+                        CircularProgressIndicator(color = RacingRed)
+                        Spacer(modifier = Modifier.height(16.dp))
+                    } else if (availableFiles.isNotEmpty()) {
+                        ExposedDropdownMenuBox(
+                            expanded = dropdownExpanded,
+                            onExpandedChange = { dropdownExpanded = it },
+                            modifier = Modifier.padding(bottom = 16.dp).fillMaxWidth(0.8f)
+                        ) {
+                            OutlinedTextField(
+                                value = selectedFile ?: "Select a file",
+                                onValueChange = {},
+                                readOnly = true,
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
+                                colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
+                                    focusedBorderColor = RacingRed,
+                                    unfocusedBorderColor = CheckeredGray,
+                                    focusedTextColor = TrackWhite,
+                                    unfocusedTextColor = TrackWhite
+                                ),
+                                modifier = Modifier.menuAnchor()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = dropdownExpanded,
+                                onDismissRequest = { dropdownExpanded = false }
+                            ) {
+                                availableFiles.forEach { file ->
+                                    DropdownMenuItem(
+                                        text = { Text(file) },
+                                        onClick = {
+                                            selectedFile = file
+                                            dropdownExpanded = false
+                                            rulesLoaded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Text("No files found in bucket.", color = CheckeredGray)
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
 
-                    if (csvLoaded) {
+                    Button(
+                        onClick = { 
+                            selectedFile?.let { file ->
+                                isFetchingRules = true
+                                errorMessage = null
+                                memoryBankManager.fetchRules(file) { success ->
+                                    scope.launch(Dispatchers.Main) {
+                                        isFetchingRules = false
+                                        rulesLoaded = success
+                                        if (!success) {
+                                            errorMessage = "Failed to fetch rules. Check if bucket is public."
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = CarbonGray),
+                        modifier = Modifier.padding(bottom = 16.dp),
+                        enabled = selectedFile != null
+                    ) {
+                        Text(if (isFetchingRules) "Fetching..." else "Load Memory Bank", color = TrackWhite)
+                    }
+
+                    if (rulesLoaded) {
                         val statusText = if (activeSectorId != null) {
                             "Monitoring Sector $activeSectorId"
                         } else {
@@ -353,8 +407,8 @@ fun DashboardScreen() {
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
-                    } else {
-                        Text("No CSV Rules Loaded", color = CheckeredGray)
+                    } else if (!isFetchingRules) {
+                        Text(errorMessage ?: "No Rules Loaded. Tap Load.", color = if (errorMessage != null) RacingRed else CheckeredGray)
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                 } else {

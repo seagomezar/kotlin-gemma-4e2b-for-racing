@@ -24,7 +24,8 @@ data class CoachingPayload(
     val instruction: String,
     val urgency: String = "NORMAL",
     val targetCorner: String = "Unknown",
-    val latencyMs: Long = 0
+    val latencyMs: Long = 0,
+    val audioFile: String? = null
 )
 
 data class TrackSectorPoint(
@@ -33,19 +34,23 @@ data class TrackSectorPoint(
     val segment_id: Int
 )
 
+data class CoachingRulesResponse(
+    val coachingRules: List<CoachingRecommendation>
+)
+
 data class CoachingRecommendation(
-    val type: String,
+    val id: String,
     val sector_id: Int,
-    val start_lat: Double,
-    val start_long: Double,
-    val end_lat: Double,
-    val end_long: Double,
     val tag: String,
     val title: String,
     val description: String,
     val metric: String,
+    val operator: String,
     val threshold: Double,
-    val optimal_value: Double
+    val optimal_value: Double,
+    val average_value: Double,
+    val frequency: Double,
+    val audio_file: String
 )
 
 data class SectorMetrics(
@@ -58,4 +63,12 @@ data class SectorMetrics(
     var lastLat: Double? = null,
     var lastLong: Double? = null,
     var totalSectorDistance: Double? = null // Pre-calculated from CSV start to end
+)
+
+data class GcsObjectsResponse(
+    val items: List<GcsObjectItem>?
+)
+
+data class GcsObjectItem(
+    val name: String
 )
