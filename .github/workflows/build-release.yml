@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
 
     steps:
       - name: Checkout code
@@ -32,7 +34,7 @@ jobs:
 
       - name: Sign Release APK
         id: sign_app
-        if: ${{ secrets.KEYSTORE_B64 != '' }}
+        if: ${{ env.KEYSTORE_B64 != '' }}
         uses: r0adkll/sign-android-release@v1
         with:
           releaseDirectory: app/build/outputs/apk/release
