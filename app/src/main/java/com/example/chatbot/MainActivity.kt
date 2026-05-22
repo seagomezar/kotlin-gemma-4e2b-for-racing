@@ -12,6 +12,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.BorderStroke
@@ -777,25 +779,35 @@ fun DashboardScreen() {
             }
         }
     ) { innerPadding ->
-        Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(innerPadding)
+        ) {
             // ---------- HEADER ----------
             CenterAlignedTopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    titleContentColor = MaterialTheme.colorScheme.primary
+                    containerColor = SurfaceDark,
+                    titleContentColor = NeonRed
                 ),
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
                         Icon(
                             imageVector = Icons.Default.DirectionsCar,
                             contentDescription = "Gemma Racing",
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = NeonRed
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "GEMMA RACING DASHBOARD",
+                            text = "SONOMA APEX AI COACH",
                             fontWeight = FontWeight.Black,
-                            fontStyle = FontStyle.Italic
+                            fontStyle = FontStyle.Italic,
+                            letterSpacing = 1.sp,
+                            fontSize = 18.sp
                         )
                     }
                 }
@@ -806,41 +818,108 @@ fun DashboardScreen() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Main Speedometer and Gear/Lap Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.medium,
-                    colors = CardDefaults.cardColors(containerColor = CarbonGray)
+                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                    border = BorderStroke(1.dp, SurfaceBorder),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(24.dp),
+                            .padding(16.dp),
                         horizontalArrangement = Arrangement.SpaceAround,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(imageVector = Icons.Default.Speed, contentDescription = "Speed", tint = TrackWhite)
-                            Text(text = "SPEED", fontSize = 12.sp, color = CheckeredGray)
-                            Text(text = "%.1f km/h".format(speed), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = RacingRed)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(text = "STEERING", fontSize = 12.sp, color = CheckeredGray)
-                            Text(text = "%.2f°".format(steering), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TrackWhite)
+                        // Circular Speedometer Gauge
+                        CircularSpeedometerGauge(speed = speed)
+                        
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // F1 Gear & Lap display
+                            GearLapHud(gear = gear, lap = lap)
+                            
+                            // Pulse/Breathing Active badge
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .background(
+                                        color = if (sessionActive) NeonGreen.copy(alpha = 0.15f) else CoolSteel.copy(alpha = 0.1f),
+                                        shape = RoundedCornerShape(6.dp)
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (sessionActive) NeonGreen else CoolSteel,
+                                        shape = RoundedCornerShape(6.dp)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .background(
+                                            color = if (sessionActive) NeonGreen else CoolSteel,
+                                            shape = RoundedCornerShape(3.dp)
+                                        )
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (sessionActive) "LIVE TELEMETRY" else "STANDBY",
+                                    color = Color.White,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 0.8.sp
+                                )
+                            }
                         }
                     }
                 }
+
+                // Steering column HUD card
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                    border = BorderStroke(1.dp, SurfaceBorder),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        SteeringHud(steering = steering)
+                    }
+                }
+
+                // Cockpit Pedals control input card
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                    border = BorderStroke(1.dp, SurfaceBorder),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        PedalsTelemetry(throttle = throttle, brake = brake)
+                    }
+                }
+                
+                // Advanced Pro Sensor Telemetry Grid
+                ProSensorTelemetryGrid(
+                    shockPots = shockPots,
+                    tireSlip = tireSlipVectors,
+                    wheelDeltas = wheelSpeedDeltas
+                )
             }
 
             // ---------- STATUS & COACHING ----------
-            Spacer(modifier = Modifier.weight(1f))
-
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Button(
                     onClick = { 
@@ -848,149 +927,161 @@ fun DashboardScreen() {
                         if (!sessionActive) latestCoaching = null
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (sessionActive) CarbonGray else RacingRed
+                        containerColor = if (sessionActive) SurfaceDark else NeonRed,
+                        contentColor = Color.White
                     ),
-                    modifier = Modifier.padding(bottom = 16.dp).fillMaxWidth()
+                    border = BorderStroke(1.5.dp, if (sessionActive) NeonRed else Color.Transparent),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
                 ) {
-                    Text(if (sessionActive) "STOP COACHING SESSION" else "START COACHING SESSION", color = TrackWhite, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (sessionActive) "STOP COACHING SESSION" else "START COACHING SESSION",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 13.sp,
+                        letterSpacing = 1.sp
+                    )
                 }
 
                 if (selectedTab == 1) {
                     // Memory Bank specific UI
-                    
-                    if (isFetchingFiles) {
-                        CircularProgressIndicator(color = RacingRed)
-                        Spacer(modifier = Modifier.height(16.dp))
-                    } else if (availableFiles.isNotEmpty()) {
-                        ExposedDropdownMenuBox(
-                            expanded = dropdownExpanded,
-                            onExpandedChange = { dropdownExpanded = it },
-                            modifier = Modifier.padding(bottom = 16.dp).fillMaxWidth(0.8f)
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, SurfaceBorder),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            OutlinedTextField(
-                                value = selectedFile ?: "Select a file",
-                                onValueChange = {},
-                                readOnly = true,
-                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
-                                colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
-                                    focusedBorderColor = RacingRed,
-                                    unfocusedBorderColor = CheckeredGray,
-                                    focusedTextColor = TrackWhite,
-                                    unfocusedTextColor = TrackWhite
-                                ),
-                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                            Text(
+                                text = "MEMORY BANK SELECTOR",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NeonCyan,
+                                letterSpacing = 1.sp,
+                                modifier = Modifier.align(Alignment.Start)
                             )
-                            ExposedDropdownMenu(
-                                expanded = dropdownExpanded,
-                                onDismissRequest = { dropdownExpanded = false }
-                            ) {
-                                availableFiles.forEach { file ->
-                                    DropdownMenuItem(
-                                        text = { Text(file) },
-                                        onClick = {
-                                            selectedFile = file
-                                            dropdownExpanded = false
-                                            rulesLoaded = false
-                                        }
+                            
+                            if (isFetchingFiles) {
+                                CircularProgressIndicator(color = NeonRed)
+                            } else if (availableFiles.isNotEmpty()) {
+                                ExposedDropdownMenuBox(
+                                    expanded = dropdownExpanded,
+                                    onExpandedChange = { dropdownExpanded = it },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    OutlinedTextField(
+                                        value = selectedFile ?: "Select a file",
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
+                                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
+                                            focusedBorderColor = NeonRed,
+                                            unfocusedBorderColor = SurfaceBorder,
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                                     )
-                                }
-                            }
-                        }
-                    } else {
-                        Text("No files found in bucket.", color = CheckeredGray)
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
-
-                    Button(
-                        onClick = { 
-                            selectedFile?.let { file ->
-                                isFetchingRules = true
-                                errorMessage = null
-                                memoryBankManager.fetchRules(file) { success ->
-                                    scope.launch(Dispatchers.Main) {
-                                        isFetchingRules = false
-                                        rulesLoaded = success
-                                        if (!success) {
-                                            errorMessage = "Failed to fetch rules. Check if bucket is public."
+                                    ExposedDropdownMenu(
+                                        expanded = dropdownExpanded,
+                                        onDismissRequest = { dropdownExpanded = false }
+                                    ) {
+                                        availableFiles.forEach { file ->
+                                            DropdownMenuItem(
+                                                text = { Text(file) },
+                                                onClick = {
+                                                    selectedFile = file
+                                                    dropdownExpanded = false
+                                                    rulesLoaded = false
+                                                }
+                                            )
                                         }
                                     }
                                 }
+                            } else {
+                                Text("No files found in bucket.", color = CheckeredGray)
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = CarbonGray),
-                        modifier = Modifier.padding(bottom = 16.dp),
-                        enabled = selectedFile != null
-                    ) {
-                        Text(if (isFetchingRules) "Fetching..." else "Load Memory Bank", color = TrackWhite)
-                    }
 
-                    if (rulesLoaded) {
-                        val statusText = if (activeSectorId != null) {
-                            "Monitoring Sector $activeSectorId"
-                        } else {
-                            "Waiting for Track Coordinates..."
+                            Button(
+                                onClick = { 
+                                    selectedFile?.let { file ->
+                                        isFetchingRules = true
+                                        errorMessage = null
+                                        memoryBankManager.fetchRules(file) { success ->
+                                            scope.launch(Dispatchers.Main) {
+                                                isFetchingRules = false
+                                                rulesLoaded = success
+                                                if (!success) {
+                                                    errorMessage = "Failed to fetch rules. Check if bucket is public."
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
+                                border = BorderStroke(1.dp, SurfaceBorder),
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = selectedFile != null
+                            ) {
+                                Text(if (isFetchingRules) "FETCHING RULES..." else "LOAD MEMORY BANK", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+
+                            if (rulesLoaded) {
+                                val statusText = if (activeSectorId != null) {
+                                    "Monitoring Sector $activeSectorId"
+                                } else {
+                                    "Waiting for Track Coordinates..."
+                                }
+                                Text(
+                                    text = statusText,
+                                    color = NeonGreen,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 14.sp
+                                )
+                            } else if (!isFetchingRules) {
+                                Text(errorMessage ?: "No Rules Loaded. Tap Load.", color = if (errorMessage != null) NeonRed else CheckeredGray)
+                            }
                         }
-                        Text(
-                            text = statusText,
-                            color = RacingRed,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                    } else if (!isFetchingRules) {
-                        Text(errorMessage ?: "No Rules Loaded. Tap Load.", color = if (errorMessage != null) RacingRed else CheckeredGray)
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
                 } else {
                     // AI Coach specific UI
-                    if (isThinking) {
-                        CircularProgressIndicator(color = RacingRed)
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, SurfaceBorder),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (isThinking) {
+                                GemmaThinkingOrb(modifier = Modifier.padding(vertical = 12.dp))
+                            }
 
-                    Text(
-                        text = systemStatus,
-                        color = CheckeredGray,
-                        fontStyle = FontStyle.Italic,
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = systemStatus,
+                                color = CheckeredGray,
+                                fontStyle = FontStyle.Italic,
+                                fontSize = 13.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
                 }
 
                 latestCoaching?.let { payload ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.large,
-                        colors = CardDefaults.cardColors(containerColor = if (payload.urgency == "HIGH") RacingRed else AsphaltBlack)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = payload.targetCorner.uppercase(),
-                                color = if (payload.urgency == "HIGH") TrackWhite else RacingRed,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 18.sp
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = payload.instruction,
-                                color = TrackWhite,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 28.sp,
-                                lineHeight = 34.sp,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                            if (payload.latencyMs > 0) {
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "Latency: ${payload.latencyMs}ms",
-                                    color = CheckeredGray,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                    }
+                    GlassmorphicCoachingCard(payload = payload)
                 }
             }
         }
