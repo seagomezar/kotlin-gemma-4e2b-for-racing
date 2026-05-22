@@ -50,7 +50,9 @@ data class CoachingRecommendation(
     val optimal_value: Double,
     val average_value: Double,
     val frequency: Double,
-    val audio_file: String
+    val audio_file: String? = null,
+    val priority: Int? = 2,
+    val ruleType: String? = "Ideal"
 )
 
 data class SectorMetrics(
