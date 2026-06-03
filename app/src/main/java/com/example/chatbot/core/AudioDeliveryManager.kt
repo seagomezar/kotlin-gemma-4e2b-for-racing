@@ -46,6 +46,10 @@ class AudioDeliveryManager(context: Context) : TextToSpeech.OnInitListener {
         }
     }
 
+    fun speak(text: String) {
+        deliverInstruction(CoachingPayload(instruction = text))
+    }
+
     private fun playAudioFromUrl(audioFile: String) {
         try {
             val url = "https://storage.googleapis.com/public-race-coaching/$audioFile"

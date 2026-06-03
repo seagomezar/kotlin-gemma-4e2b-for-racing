@@ -9,11 +9,35 @@ data class TelemetryPacket(
     val heading: Double? = null,
     val altitude: Double? = null,
     val satellites: Int? = null,
+    val rpm: Double? = null,
+    val waterTempF: Double? = null,
     val throttle: Double? = null,
     val brake: Double? = null,
+    val brakePressurePsi: Double? = null,
+    val brakeSwitchApplied: Boolean? = null,
     val steering: Double? = null,
     val gear: Int? = null,
     val lap: Int? = null,
+    val ecuDbwApp1Percent: Double? = null,
+    val pedalPositionPercent: Double? = null,
+    val inlineAccelG: Double? = null,
+    val lateralAccelG: Double? = null,
+    val verticalAccelG: Double? = null,
+    val rollRateDps: Double? = null,
+    val pitchRateDps: Double? = null,
+    val yawRateDps: Double? = null,
+    val engineOilTempF: Double? = null,
+    val analogOilTempF: Double? = null,
+    val oilFilterTempF: Double? = null,
+    val oilPressurePsi: Double? = null,
+    val fuelPressurePsi: Double? = null,
+    val fuelLevelGallons: Double? = null,
+    val ecuMilOut: Int? = null,
+    val batteryVoltage: Double? = null,
+    val wheelSpeedFlMph: Double? = null,
+    val wheelSpeedFrMph: Double? = null,
+    val wheelSpeedRlMph: Double? = null,
+    val wheelSpeedRrMph: Double? = null,
     // Pro Sensor Channels required by the review
     val shockPots: List<Double>? = null,
     val tireSlipVectors: List<Double>? = null,
@@ -50,7 +74,9 @@ data class CoachingRecommendation(
     val optimal_value: Double,
     val average_value: Double,
     val frequency: Double,
-    val audio_file: String
+    val audio_file: String,
+    val priority: Int = 3,
+    val command: String = ""
 )
 
 data class SectorMetrics(
@@ -70,5 +96,6 @@ data class GcsObjectsResponse(
 )
 
 data class GcsObjectItem(
-    val name: String
+    val name: String,
+    val updated: String? = null
 )
